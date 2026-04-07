@@ -1,0 +1,13 @@
+const express = require("express");
+const {authMiddleware}= require("../middleware/auth.middleware");
+const accountController = require("../controllers/account.controller")
+
+const router = express.Router();
+
+ 
+router.post("/",authMiddleware,accountController.createAccount);
+router.get("/",authMiddleware,accountController.getAllAccounts);
+router.get("/balance/:accountId",authMiddleware,accountController.getAcBalance)
+  
+
+module.exports = router;

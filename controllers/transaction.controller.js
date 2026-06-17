@@ -4,6 +4,10 @@ const accountModel = require("../models/account.model");
 const mongoose = require("mongoose");
 const sendEmail = require("../utils/sendEmail");
 const userModel = require("../models/user.model");
+const emailQueue= require("../queues/email.queue");
+const redisConnection =  require("../src/config/redis");
+
+
 
 async function createTransaction(req, res) {
   const { fromAccount, toAccount, amount, idempotencyKey } = req.body;
@@ -106,6 +110,24 @@ async function createTransaction(req, res) {
         "both sender and receiver's account should be active to process a transaction",
     });
   }
+
+  const lockKey = `lock:account:${fromUserAccount._id}`
+  const lock = await redisConnection.set(
+  lockKey,
+  "locked",
+  "NX",
+  "EX",
+  10
+);
+
+  if (!lock) {
+  return res.status(409).json({
+    message:
+      "Transaction already in progress"
+  });
+}
+
+
 
   //5. Create transaction(PENDING)
   const session = await mongoose.startSession();
@@ -219,20 +241,80 @@ async function createTransaction(req, res) {
 
     await session.commitTransaction();
 
-    sendEmail(
-      fromUserAccount.user.email,
-      "Transaction Completed!",
-      "Money sent securely",
-      `<p>${amount} has been debited from your A/C</p>`
-    );
+   try {
+  await emailQueue.add(
+    "debit-email",
+    {
+      to:
+        fromUserAccount.user.email,
 
-    sendEmail(
-      toUserAccount.user.email,
-      "Money Received!",
-      "You got money",
-      `<p>${amount} has been credited to your A/C</p>`
-    );
+      subject:
+        "Transaction Completed!",
 
+      text:
+        "Money sent securely",
+
+      html: `
+        <p>
+          ₹${amount}
+          has been debited
+          from your account
+        </p>
+      `,
+    },
+    {
+      attempts: 3,
+      backoff: {
+        type:
+          "exponential",
+        delay: 2000,
+      },
+    }
+  );
+
+  await emailQueue.add(
+    "credit-email",
+    {
+      to:
+        toUserAccount.user.email,
+
+      subject:
+        "Money Received!",
+
+      text:
+        "Money received",
+
+      html: `
+        <p>
+          ₹${amount}
+          has been credited
+          to your account
+        </p>
+      `,
+    },
+    {
+      attempts: 3,
+      backoff: {
+        type:
+          "exponential",
+        delay: 2000,
+      },
+    }
+  );
+
+  req.log.info({
+    action:
+      "EMAILS_QUEUED",
+  });
+
+} catch (emailErr) {
+  req.log.error({
+    action:
+      "EMAIL_QUEUE_FAILED",
+    error:
+      emailErr.message,
+  });
+}
     return res.status(201).json({
       message: "Transaction successful",
       transaction,
@@ -251,6 +333,7 @@ async function createTransaction(req, res) {
     });
   } finally {
     session.endSession();
+    await redis.del(lockKey);
 
     req.log.info({
       action: "SESSION_ENDED",

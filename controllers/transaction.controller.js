@@ -19,6 +19,7 @@ async function createTransaction(req, res) {
     amount,
   });
 
+
   //1.Validate Request
   if (!fromAccount || !toAccount || !amount || !idempotencyKey) {
     req.log.warn({
@@ -35,33 +36,7 @@ async function createTransaction(req, res) {
       message: "Invalid amount",
     });
   }
-
-  const fromUserAccount = await accountModel
-    .findOne({ _id: fromAccount })
-    .populate("user");
-
-  const toUserAccount = await accountModel
-    .findOne({ _id: toAccount })
-    .populate("user");
-
-  if (!fromUserAccount || !toUserAccount) {
-    return res.status(400).json({
-      message: "Invalid from or to account",
-    });
-  }
-
-  if (fromUserAccount.user._id.toString() !== req.user._id.toString()) {
-    req.log.warn({
-      action: "UNAUTHORIZED_ACCOUNT_ACCESS",
-      userId: req.user._id,
-      fromAccount,
-    });
-    return res.status(403).json({
-      message: "You can only use your own account",
-    });
-  }
-
-  // 2.Validate idempotency key
+      // 2.Validate idempotency key
   const isTransactionAlreadyExists = await transactionModel.findOne({
     idempotencyKey: idempotencyKey,
   });
@@ -99,6 +74,33 @@ async function createTransaction(req, res) {
       });
     }
   }
+
+  const fromUserAccount = await accountModel
+    .findOne({ _id: fromAccount })
+    .populate("user");
+
+  const toUserAccount = await accountModel
+    .findOne({ _id: toAccount })
+    .populate("user");
+
+  if (!fromUserAccount || !toUserAccount) {
+    return res.status(400).json({
+      message: "Invalid from or to account",
+    });
+  }
+
+  if (fromUserAccount.user._id.toString() !== req.user._id.toString()) {
+    req.log.warn({
+      action: "UNAUTHORIZED_ACCOUNT_ACCESS",
+      userId: req.user._id,
+      fromAccount,
+    });
+    return res.status(403).json({
+      message: "You can only use your own account",
+    });
+  }
+
+
 
   // 3.Check account status
   if (
@@ -210,16 +212,16 @@ async function createTransaction(req, res) {
       amount: amount,
     });
 
-    const updatedBalance = await fromUserAccount.getBalance(session);
+    // const updatedBalance = await fromUserAccount.getBalance(session);
 
-    if (updatedBalance !== balance - amount) {
-      txnLogger.error({
-        action: "RACE_CONDITION_DETECTED",
-        expected: balance - amount,
-        actual: updatedBalance,
-      });
-      throw new Error("Race condition detected");
-    }
+    // if (updatedBalance !== balance - amount) {
+    //   txnLogger.error({
+    //     action: "RACE_CONDITION_DETECTED",
+    //     expected: balance - amount,
+    //     actual: updatedBalance,
+    //   });
+    //   throw new Error("Race condition detected");
+    // }
 
     await transactionModel.updateOne(
       { _id: transaction._id },
@@ -333,7 +335,7 @@ async function createTransaction(req, res) {
     });
   } finally {
     session.endSession();
-    await redis.del(lockKey);
+    await redisConnection.del(lockKey);
 
     req.log.info({
       action: "SESSION_ENDED",

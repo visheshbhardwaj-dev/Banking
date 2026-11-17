@@ -12,6 +12,10 @@ const transporter = nodemailer.createTransport({
 
 
 const sendEmail = async (to,subject,text,html)=>{
+    if (process.env.EMAIL_MODE === "log") {
+  console.log("Email (log mode):", { to, subject });
+  return;
+}
     try{
         const info = await transporter.sendMail({
             from: '"tyerbanks" <tyerbanks58@gmail.com>',

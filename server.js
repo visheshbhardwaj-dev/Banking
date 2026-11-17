@@ -8,6 +8,9 @@ const PORT = process.env.PORT || 3000;
 async function startServer() {
   try {
     await connectDB();
+    if (process.env.RUN_WORKER === "true") {
+      require("./workers/email.worker");
+     }
     app.listen(PORT, () => {
       console.log(`Server started on ${PORT}`);
     });
